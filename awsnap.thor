@@ -1,18 +1,30 @@
 require 'right_aws'
+require 'yaml'
 
-class Awsnap < Thor
-  include Thor::Actions
+module Awsnap
+  module Common
+    def credentials
+      YAML::load_file(File.expand_path('./config/credentials.yml'))
+    end
 
-  desc :create_snapshots, "create snapshot VOLUME_ID"
-  method_option :volumes, :type=>:string, :required=>true
-  def create_snapshots
-    volumes.each{|vol|
-      create_snapshot(vol)
-    }
+    def create_snapshot(volumes)
+        access_key_id = credentials['access_key_id']
+        secret_access_key = credentials['secret_access_key']
+        raws = RightAws::Ec2.new(access_key_id, secret_access_key)
+        volumes.each do |volume|
+          raws.create_snapshot(volume)
+        end
+    end
   end
 
-  desc "delete old snapshots"
-  def delete_snapshots
+  class Snapshot < Thor
+    include Thor::Actions
+    include Common
 
+    desc :create, "Create snapshot for given volume(s)"
+    method_options volumes: :array, required: true
+    def create
+      create_snapshot options[:volumes]
+    end
   end
 end
