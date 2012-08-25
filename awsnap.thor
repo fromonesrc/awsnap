@@ -31,7 +31,7 @@ module Awsnap
     include Common
 
     desc :create, "Create snapshot for given volume(s)"
-    method_options volumes: :array, required: true
+    method_options volumes: :array, aliases: '-v', required: true
     def create
       create_snapshot options[:volumes]
     end
