@@ -19,10 +19,13 @@ module Awsnap
       end
     end
 
-    def delete_snapshots(snapshots)
-      snapshots.each do |snapshot|
-        raws.delete_snapshot(snapshot)
-      end
+    def delete_snapshots(snapshots, rules="*")
+      if rules == "*"
+        raws.delete_snapshots(snapshots)
+      else
+        raws.describe_snapshots(snapshots).each do |snapshot|
+          raws
+        end
     end
   end
 
@@ -37,7 +40,7 @@ module Awsnap
     end
 
     desc :delete, "Delete snapshots with cron-like rules"
-    method_options snapshots: :array, required: true
+    method_options snapshots: :array, required: true, aliases: '-s'
     method_options yearly: :boolean, aliases: 'annually -a -y'
     method_options monthly: :boolean, aliases: '-m'
     method_options weekly: :boolean, aliases: '-w'
@@ -45,7 +48,7 @@ module Awsnap
     method_options hourly: :boolean, aliases: '-h'
     method_options rules: :string, aliases: '-r'
     def delete
-      delete_snapshot options[:snapshots]
+      delete_snapshots options[:snapshots]
     end
   end
 end
