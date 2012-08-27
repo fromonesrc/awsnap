@@ -1,0 +1,17 @@
+#rules are evaluated in order
+rules:
+  -
+    #all for last day
+    per-hour: "*"
+    per-day: "*"
+    days-ago: 1
+
+  -
+    #daily for last two weeks
+    per-day: 1
+    days-ago: 14
+
+  -
+    #one per week forever
+    per-week: 1
+    days-ago: "*"
