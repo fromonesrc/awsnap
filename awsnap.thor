@@ -1,5 +1,8 @@
+require 'debugger'
 require 'right_aws'
 require 'yaml'
+require 'time'
+require 'chronic'
 
 module Awsnap
   module Common
@@ -13,10 +16,14 @@ module Awsnap
       @@ec2 ||= RightAws::Ec2.new(access_key_id, secret_access_key)
     end
 
-    def rules
+    def rule_set
       config = YAML::load_file(File.expand_path('./config/rules.yml'))
-      rules = config['rules'].each{|rule| rule}
-      p rules
+      config['rules'].each{|rule| rule}
+    end
+
+    def rule_supported? rule
+      false
+      true if rule.include? 'per_day' || 'per_week' || 'per_month' || 'per_year'
     end
 
     def create_snapshots volumes
@@ -25,43 +32,90 @@ module Awsnap
       end
     end
 
-    def delete_snapshots(snapshots=nil, options={})
-      rules = options[:rules]
-      filtered_snapshots = []
-      if snapshots && rules
-        snapshots = snapshots.each{|snapshot| {'snapshot-id' => snapshot}}.join(',')
-        ec2.describe_snapshots(filters: rules).each do |snapshot|
-          filtered_snapshots << snapshot
-        end
-      elsif snapshots
-        filtered_snapshots = snapshots
-      elsif rules
-        ec2.describe_snapshots(filters: rules).each do |snapshot|
-          filtered_snapshots << snapshot
-        end
-      else
-        p "Must provide a snapshot or rule set"
-      end
+    def prune_snapshots options={}
+      if rule_set
+        @per_hour, @per_day, @per_week, @per_month, @per_year = 0
+        cutoff_date = Time.now
 
-      if options[:dry]
-        filtered_snapshots.each_with_index {|s,i| p "#{i+1}: #{s}"}
-        p "If this were not a test, those snapshots would have been deleted."
-      elsif filtered_snapshots.size > 1
-        filtered_snapshots.each do |snapshot|
-          ec2.delete_snapshot snapshot
+        snapshots = ec2.describe_snapshots
+
+        snapshots.reverse!
+        snapshots.drop 6500
+        rule_set.each do |rules|
+          rules.each do |k,v|
+            if rule_supported? k
+              instance_variable_set("@#{k.to_sym}", v)
+            elsif k.include? 'days-ago'
+              cutoff_date = Chronic.parse("#{v} days ago")
+            else
+              p "Rule '#{k}' is not supported"
+            end
+          end
+
+
+          #remove snapshots from array if we do not want to delete them
+          debugger
+          snapshots.select!{|k|
+            p k[:aws_started_at]
+            started_at = Time.parse(k[:aws_started_at])
+            started_at < cutoff_date
+          }
+
+          #remove snapshots where the count per timeframe is higher than needed
+          # %w(day week month year).each do |time|
+            # if time.to_sym.present?
+          snapshots = snapshots.group_by{|v|
+            Time.parse(v[:aws_started_at]).to_date
+          }
+          debugger
+          snapshots = snapshots.each do |snapshot|
+            snapshot.drop_while{|i| i < @per_day} if @per_day
+          end
+              # started_at = Time.parse(k[:aws_started_at])
+              # started_at >=
+                # break snapshots started_at into chunks of days
+                # count snapshots for day chunk
+                # drop excess snapshots
+              # started_at <
+              # }
+            # end
+          # end
+
         end
+        delete_snapshots(snapshots, options)
       else
-        ec2.delete_snapshot snapshots.first
+        p "Add some rules to config/rules.yml"
       end
     end
 
-    def retrieve_snapshots rules={}
-      if rules.present?
-        snapshots = ec2.describe_snapshots(filters: {'volume-id' => rules})
+    def delete_snapshots(filtered_snapshots, options={})
+      filtered_snapshots
+
+      if options[:dry]
+        filtered_snapshots.each_with_index {|s,i|
+          if options[:verbose]
+            if s.kind_of? Hash
+              p "#{i+1}: #{s[:aws_id]}"
+            else
+              p "#{i+1}: #{s}"
+            end
+          end
+        }
+        p "If this were not a test, #{filtered_snapshots.count} snapshots would have been destroyed."
+      else
+        filtered_snapshots.each do |snapshot|
+          ec2.delete_snapshot snapshot
+        end
+      end
+    end
+
+    def retrieve_snapshots volume=nil
+      if volume
+        snapshots = ec2.describe_snapshots(filters: {'volume-id' => volume})
       else
         snapshots = ec2.describe_snapshots
       end
-      snapshots.map{|snapshot| snapshot[:aws_id]}.join(',')
+      snapshots
     end
   end
 
@@ -70,8 +124,8 @@ module Awsnap
     include Common
 
     desc :find_by_volume, "Find snapshots created from a base volume"
-    method_option volume: :string, aliases: 'v'
-    method_option filter: :string, aliases: 'f'
+    method_options volume: :string
+    method_options filter: :string
     def find_by_volume
       p retrieve_snapshots(options[:filter])
     end
@@ -84,21 +138,9 @@ module Awsnap
     end
 
     desc :prune, "Prune snapshots with cron-style rules."
-    #default: all for 24 hours, daily for two weeks, weekly prior
-    #(* 24h) (1/d) (1/w)
-    #* * 1
-    method_option yearly: :boolean, aliases: 'annually a y'
-    method_option monthly: :boolean, aliases: 'm'
-    method_option weekly: :boolean, aliases: 'w'
-    method_option daily: :boolean, aliases: 'd'
-    method_option hourly: :boolean, aliases: 'h'
-    method_option rules: :string
     method_options dry: :boolean
     def prune
-      rules
-      # delete_snapshots retrieve_snapshots({
-        # rules: options[:rules],
-        # dry: options[:dry]})
+      prune_snapshots({dry: options[:dry]})
     end
 
     desc :delete, "Delete collection of snapshots"
