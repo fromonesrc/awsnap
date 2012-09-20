@@ -35,51 +35,58 @@ module Awsnap
     def prune_snapshots options={}
       if rule_set
         @per_hour, @per_day, @per_week, @per_month, @per_year = 0
-        cutoff_date = Time.now
+        cutoff_date = Date.today
 
-        snapshots = ec2.describe_snapshots
+        if options[:fixed]
+          # snapshots = ec2.describe_snapshots
+          # serialized = Marshal.dump(snapshots)
+          # File.open('./fixtures/snapshots_dump.txt', 'w') {|f| f.write(serialized) }
+
+          snapshots = Marshal.load File.read('./fixtures/snapshots_dump.txt')
+        else
+          snapshots = ec2.describe_snapshots
+        end
 
         snapshots.reverse!
-        snapshots.drop 6500
+        snapshots = snapshots.drop 6990
+
+        debugger
         rule_set.each do |rules|
           rules.each do |k,v|
             if rule_supported? k
               instance_variable_set("@#{k.to_sym}", v)
             elsif k.include? 'days-ago'
-              cutoff_date = Chronic.parse("#{v} days ago")
+              cutoff_date = Chronic.parse("#{v} days ago").to_date
             else
               p "Rule '#{k}' is not supported"
             end
           end
 
-
-          #remove snapshots from array if we do not want to delete them
-          debugger
-          snapshots.select!{|k|
-            p k[:aws_started_at]
-            started_at = Time.parse(k[:aws_started_at])
-            started_at < cutoff_date
-          }
-
-          #remove snapshots where the count per timeframe is higher than needed
-          # %w(day week month year).each do |time|
-            # if time.to_sym.present?
+          #group snapshots by date
           snapshots = snapshots.group_by{|v|
             Time.parse(v[:aws_started_at]).to_date
           }
+
           debugger
-          snapshots = snapshots.each do |snapshot|
-            snapshot.drop_while{|i| i < @per_day} if @per_day
+          #remove snapshots from array if we do not want to delete them
+          snapshots.each do |group|
+            group.keep_if{|snapshot|
+              started_at = Date.parse(snapshot[:aws_started_at])
+              started_at < cutoff_date
+            }
+            group.drop_while{|i| i < @per_day } if @per_day
           end
-              # started_at = Time.parse(k[:aws_started_at])
-              # started_at >=
-                # break snapshots started_at into chunks of days
-                # count snapshots for day chunk
-                # drop excess snapshots
-              # started_at <
-              # }
-            # end
+
+          #remove snapshots where the count per timeframe is higher than needed
+          debugger
+
+          # debugger
+          # snapshots = snapshots.each do |group|
+            # snapshot.drop_while{|i| i < @per_day} if @per_day
           # end
+          # break snapshots started_at into chunks of days
+          # count snapshots for day chunk
+          # drop excess snapshots
 
         end
         delete_snapshots(snapshots, options)
@@ -139,8 +146,9 @@ module Awsnap
 
     desc :prune, "Prune snapshots with cron-style rules."
     method_options dry: :boolean
+    method_options fixed: :boolean
     def prune
-      prune_snapshots({dry: options[:dry]})
+      prune_snapshots({dry: options[:dry], fixed: options[:fixed]})
     end
 
     desc :delete, "Delete collection of snapshots"
