@@ -8,7 +8,3 @@ rules:
     #daily for last two weeks
     per_day: 1
     days_ago: 14
-
-  -
-    #one per week forever
-    per_week: 1
