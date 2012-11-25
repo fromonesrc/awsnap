@@ -8,14 +8,9 @@ module Awsnap
     API_HARD_LIMIT = 2000
     API_SAFE_LIMIT = 500
 
-    def credentials
-      YAML::load_file(File.expand_path('./config/credentials.yml'))
-    end
-
     def ec2
-      creds = credentials
-      access_key_id = creds['access_key_id']
-      secret_access_key = creds['secret_key_id']
+      access_key_id = ENV['AWS_ACCESS_KEY_ID']
+      secret_access_key = ENV['AWS_SECRET_ACCESS_KEY']
       @@ec2 ||= RightAws::Ec2.new(access_key_id, secret_access_key)
     end
 
